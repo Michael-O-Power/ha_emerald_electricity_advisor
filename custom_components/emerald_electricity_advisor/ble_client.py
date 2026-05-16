@@ -22,14 +22,14 @@ class EmeraldBLEClient:
 
     def __init__(
         self,
+        hass: HomeAssistant,
         ble_address: str,
         pairing_code: int,
         pulses_per_kwh: int,
         on_data_callback: Optional[Callable] = None,
-        *args,  # Absorbs any accidental trailing arguments gracefully
-        **kwargs,
     ):
         """Initialize the BLE client."""
+        self.hass = hass
         self.ble_address = ble_address.lower()
         self.pairing_code = pairing_code
         self.pulses_per_kwh = pulses_per_kwh
@@ -42,22 +42,27 @@ class EmeraldBLEClient:
         try:
             _LOGGER.info(f"Attempting to connect to Emerald device at {self.ble_address}")
             
-            ble_device = None
-            if hass:
-                ble_device = async_ble_device_from_address(hass, self.ble_address, connectable=True)
+            # Explicitly clear out old hanging connections before creating a new one
+            if self.client:
+                await self.disconnect()
+
+            active_hass = hass or self.hass
+            ble_device = async_ble_device_from_address(active_hass, self.ble_address, connectable=True)
             
-            if ble_device:
-                _LOGGER.debug("Found device in HA Bluetooth cache. Establishing robust retry connection.")
-                self.client = await establish_connection(
-                    BleakClient,
-                    ble_device,
-                    name=f"Emerald {self.ble_address}",
-                    disconnected_callback=lambda client: setattr(self, "is_connected", False)
-                )
-            else:
-                _LOGGER.warning("Device context unavailable or not cached. Falling back to direct connection.")
-                self.client = BleakClient(self.ble_address, timeout=10.0)
-                await self.client.connect()
+            if not ble_device:
+                _LOGGER.error(f"Emerald device {self.ble_address} not discovered in HA Bluetooth cache. Is it out of range?")
+                self.is_connected = False
+                return False
+
+            _LOGGER.debug("Found device in HA Bluetooth cache. Securing connection via bleak-retry-connector.")
+            
+            # establish_connection naturally manages local connection slots on HA host
+            self.client = await establish_connection(
+                BleakClient,
+                ble_device,
+                name=f"Emerald {self.ble_address}",
+                disconnected_callback=lambda client: setattr(self, "is_connected", False)
+            )
 
             self.is_connected = True
             _LOGGER.info(f"Connected to Emerald device at {self.ble_address}")
