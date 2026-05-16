@@ -47,20 +47,26 @@ class EmeraldBLEClient:
                 await self.disconnect()
 
             active_hass = hass or self.hass
-            ble_device = async_ble_device_from_address(active_hass, self.ble_address, connectable=True)
+            
+            # Try lowercase address first
+            ble_device = async_ble_device_from_address(active_hass, self.ble_address.lower(), connectable=True)
+            
+            # If not found, try uppercase address to prevent case-mismatch cache failures
+            if not ble_device:
+                ble_device = async_ble_device_from_address(active_hass, self.ble_address.upper(), connectable=True)
             
             if not ble_device:
-                _LOGGER.error(f"Emerald device {self.ble_address} not discovered in HA Bluetooth cache. Is it out of range?")
+                _LOGGER.error(f"Emerald device {self.ble_address} not discovered in HA Bluetooth cache. Signal is likely too weak (Last RSSI was borderline).")
                 self.is_connected = False
                 return False
 
-            _LOGGER.debug("Found device in HA Bluetooth cache. Securing connection via bleak-retry-connector.")
+            _LOGGER.debug(f"Found device in HA Bluetooth cache (RSSI: {ble_device.rssi}). Securing connection via bleak-retry-connector.")
             
             # establish_connection naturally manages local connection slots on HA host
             self.client = await establish_connection(
                 BleakClient,
                 ble_device,
-                name=f"Emerald {self.ble_address}",
+                name=f"Emerald_{self.ble_address}",
                 disconnected_callback=lambda client: setattr(self, "is_connected", False)
             )
 
