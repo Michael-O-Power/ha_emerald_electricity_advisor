@@ -4,11 +4,11 @@ from typing import Any, Dict, Optional
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
     CONF_BLE_ADDRESS,
+    CONF_NAME,
     CONF_PAIRING_CODE,
     CONF_PULSES_PER_KWH,
     DEFAULT_NAME,
