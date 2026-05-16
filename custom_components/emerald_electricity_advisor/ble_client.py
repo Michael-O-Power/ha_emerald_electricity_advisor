@@ -7,7 +7,7 @@ from bleak import BleakClient, BleakError
 from bleak_retry_connector import establish_connection
 from homeassistant.components.bluetooth import (
     async_ble_device_from_address,
-    async_get_scanner,
+    async_current_scanners,
 )
 from homeassistant.core import HomeAssistant
 
@@ -57,16 +57,16 @@ class EmeraldBLEClient:
             if not ble_device:
                 ble_device = async_ble_device_from_address(active_hass, self.ble_address.upper(), connectable=True)
             
-            # 3. Low-Signal Bypass: If the device is stale/dropped from main cache, force pull from scanner history
+            # 3. Low-Signal Bypass: Safely grab historical frames from all active physical scanners
             if not ble_device:
                 _LOGGER.debug("Device not in standard connectable cache. Attempting historical scanner lookup bypass...")
-                for scanner in async_get_scanner(active_hass):
-                    # Check the scanner's internal history memory for our target device
+                # async_current_scanners returns the actual list of physical trackers/proxies
+                for scanner in async_current_scanners(active_hass):
                     discovered = scanner.discovered_devices_and_advertisement_data.get(self.ble_address.upper()) or \
                                  scanner.discovered_devices_and_advertisement_data.get(self.ble_address.lower())
                     if discovered:
-                        ble_device = discovered[0] # Extract the tracked BLEDevice object
-                        _LOGGER.debug(f"Bypass successful! Recovered device from scanner: {scanner.source}")
+                        ble_device = discovered[0] # Grab the tracked BLEDevice map reference
+                        _LOGGER.debug(f"Bypass successful! Recovered device context from scanner source: {scanner.source}")
                         break
 
             if not ble_device:
