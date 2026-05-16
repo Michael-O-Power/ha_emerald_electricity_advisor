@@ -49,7 +49,6 @@ class EmeraldSensorBase(CoordinatorEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.config_entry = config_entry
-        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_{self.entity_description.key}"
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -73,6 +72,7 @@ class EmeraldPowerSensor(EmeraldSensorBase):
         """Initialize the power sensor."""
         super().__init__(coordinator, config_entry)
         self._attr_name = "Power"
+        # FIX: Explicit unique ID construction without pulling missing entity descriptions
         self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_power"
         self._attr_device_class = SensorDeviceClass.POWER
         self._attr_native_unit_of_measurement = UnitOfPower.WATT
@@ -96,6 +96,7 @@ class EmeraldEnergySensor(EmeraldSensorBase):
         """Initialize the energy sensor."""
         super().__init__(coordinator, config_entry)
         self._attr_name = "Energy"
+        # FIX: Explicit unique ID construction
         self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_energy"
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -119,6 +120,7 @@ class EmeraldPulsesSensor(EmeraldSensorBase):
         """Initialize the pulses sensor."""
         super().__init__(coordinator, config_entry)
         self._attr_name = "Pulses"
+        # FIX: Explicit unique ID construction
         self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_pulses"
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_icon = "mdi:pulse"
@@ -127,3 +129,4 @@ class EmeraldPulsesSensor(EmeraldSensorBase):
     def native_value(self) -> StateType:
         """Return the state."""
         return self.coordinator.data.get("pulses")
+        
