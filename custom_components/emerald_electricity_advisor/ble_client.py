@@ -3,7 +3,8 @@ import asyncio
 import logging
 from typing import Callable, Optional
 
-from bleak import BleakClient, BleakError, discover
+from bleak import BleakClient, BleakError
+from bleak.discover import discover
 
 from .const import (
     READ_CHAR_UUID,
@@ -42,19 +43,23 @@ class EmeraldBLEClient:
             
             # Try to discover the device first
             _LOGGER.debug("Scanning for available BLE devices...")
-            devices = await discover(timeout=5.0)
-            
-            device_found = False
-            _LOGGER.debug(f"Found {len(devices)} BLE devices:")
-            for device in devices:
-                _LOGGER.debug(f"  - {device.address}: {device.name}")
-                if device.address.lower() == self.ble_address:
-                    device_found = True
-                    _LOGGER.info(f"Found Emerald device: {device.name} ({device.address})")
-            
-            if not device_found:
-                _LOGGER.warning(f"Device {self.ble_address} not found in BLE scan")
-                _LOGGER.warning("Make sure the device is powered on and in range")
+            try:
+                devices = await discover(timeout=5.0)
+                
+                device_found = False
+                _LOGGER.debug(f"Found {len(devices)} BLE devices:")
+                for device in devices:
+                    _LOGGER.debug(f"  - {device.address}: {device.name}")
+                    if device.address.lower() == self.ble_address:
+                        device_found = True
+                        _LOGGER.info(f"Found Emerald device: {device.name} ({device.address})")
+                
+                if not device_found:
+                    _LOGGER.warning(f"Device {self.ble_address} not found in BLE scan")
+                    _LOGGER.warning("Make sure the device is powered on and in range")
+            except Exception as discover_err:
+                _LOGGER.warning(f"Could not scan for devices: {discover_err}")
+                _LOGGER.info("Attempting direct connection...")
             
             # Attempt connection regardless (device might be cached)
             self.client = BleakClient(self.ble_address, timeout=10.0)
