@@ -57,24 +57,23 @@ class EmeraldBLEClient:
             if not ble_device:
                 ble_device = async_ble_device_from_address(active_hass, self.ble_address.upper(), connectable=True)
             
-            # 3. Low-Signal Bypass: Safely grab historical frames from all active physical scanners
+            # 3. Low-Signal Bypass
             if not ble_device:
                 _LOGGER.debug("Device not in standard connectable cache. Attempting historical scanner lookup bypass...")
                 for scanner in async_current_scanners(active_hass):
                     discovered = scanner.discovered_devices_and_advertisement_data.get(self.ble_address.upper()) or \
                                  scanner.discovered_devices_and_advertisement_data.get(self.ble_address.lower())
                     if discovered:
-                        ble_device = discovered[0] # Grab the tracked BLEDevice map reference
+                        ble_device = discovered[0]
                         _LOGGER.debug(f"Bypass successful! Recovered device context from scanner source: {scanner.source}")
                         break
 
             if not ble_device:
-                _LOGGER.error(f"Emerald device {self.ble_address} not discovered in HA Bluetooth cache. Signal is likely too weak (Last RSSI was borderline).")
+                _LOGGER.error(f"Emerald device {self.ble_address} not discovered in HA Bluetooth cache. Signal is likely too weak.")
                 self.is_connected = False
                 return False
 
-            # FIX: Removed the ble_device.rssi property call from the log statement to prevent object attribute crashes
-            _LOGGER.debug(f"Found device context in cache map. Securing connection via bleak-retry-connector.")
+            _LOGGER.debug("Found device context in cache map. Securing connection via bleak-retry-connector.")
             
             self.client = await establish_connection(
                 BleakClient,
@@ -86,8 +85,9 @@ class EmeraldBLEClient:
             self.is_connected = True
             _LOGGER.info(f"Connected to Emerald device at {self.ble_address}")
 
-            await self._enable_auto_upload()
+            # Try to establish notifications first before writing commands
             await self._subscribe_to_notifications()
+            await self._enable_auto_upload()
 
             return True
         except BleakError as err:
@@ -108,6 +108,11 @@ class EmeraldBLEClient:
         if self.client:
             try:
                 if self.is_connected:
+                    # Cleanly stop any existing notifications before closing down
+                    try:
+                        await self.client.stop_notify(READ_CHAR_UUID)
+                    except Exception:
+                        pass
                     await self.client.disconnect()
                 _LOGGER.info("Disconnected from Emerald device")
             except BleakError as err:
@@ -118,34 +123,45 @@ class EmeraldBLEClient:
 
     async def _enable_auto_upload(self) -> None:
         """Enable automatic power data upload from the device."""
-        if not self.client:
+        if not self.client or not self.is_connected:
             return
         try:
             enable_auto_upload = bytes.fromhex("0001020b0101")
             await self.client.write_gatt_char(
                 WRITE_CHAR_UUID, enable_auto_upload, response=False
             )
-            _LOGGER.debug("Auto-upload enabled")
+            _LOGGER.debug("Auto-upload enabled command written successfully.")
         except BleakError as err:
             _LOGGER.warning(f"Failed to enable auto-upload: {err}")
 
     async def _subscribe_to_notifications(self) -> None:
-        """Subscribe to power consumption notifications."""
-        if not self.client:
+        """Subscribe to power consumption notifications with BlueZ lock workarounds."""
+        if not self.client or not self.is_connected:
             return
         try:
             await self.client.start_notify(
                 READ_CHAR_UUID, self._notification_handler
             )
-            _LOGGER.debug("Subscribed to power notifications")
+            _LOGGER.debug("Successfully subscribed to power notifications.")
         except BleakError as err:
-            _LOGGER.warning(f"Failed to subscribe to notifications: {err}")
+            # FIX: Intercept the BlueZ conflict. If notifications are locked or bugged, toggle connection state
+            _LOGGER.warning(f"Initial notification subscription failed: {err}. Attempting connection cycle reset workaround...")
+            try:
+                # Force a manual notification clear/stop routine to drop BlueZ's lock
+                await self.client.stop_notify(READ_CHAR_UUID)
+                await asyncio.sleep(0.5)
+                await self.client.start_notify(READ_CHAR_UUID, self._notification_handler)
+                _LOGGER.info("Bypass successful: Subscribed to power notifications after connection cycle reset.")
+            except Exception as retry_err:
+                _LOGGER.error(f"Bypass failed. Unable to clear BlueZ notification lock: {retry_err}")
 
     def _notification_handler(self, sender, data: bytearray) -> None:
         """Handle notifications from the device."""
+        _LOGGER.debug(f"Raw BLE frame intercepted from advisor: {data.hex()}")
         try:
             parsed_data = self._parse_notification(data)
             if parsed_data and self.on_data_callback:
+                _LOGGER.info(f"Parsed updates matching sensor keys: {parsed_data}")
                 self.on_data_callback(parsed_data)
         except Exception as err:
             _LOGGER.error(f"Error parsing notification: {err}")
