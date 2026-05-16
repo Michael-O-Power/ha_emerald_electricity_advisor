@@ -5,7 +5,10 @@ from typing import Callable, Optional
 
 from bleak import BleakClient, BleakError
 from bleak_retry_connector import establish_connection
-from homeassistant.components.bluetooth import async_ble_device_from_address
+from homeassistant.components.bluetooth import (
+    async_ble_device_from_address,
+    async_get_scanner,
+)
 from homeassistant.core import HomeAssistant
 
 from .const import (
@@ -42,27 +45,37 @@ class EmeraldBLEClient:
         try:
             _LOGGER.info(f"Attempting to connect to Emerald device at {self.ble_address}")
             
-            # Explicitly clear out old hanging connections before creating a new one
             if self.client:
                 await self.disconnect()
 
             active_hass = hass or self.hass
             
-            # Try lowercase address first
+            # 1. Standard cache check (lowercase)
             ble_device = async_ble_device_from_address(active_hass, self.ble_address.lower(), connectable=True)
             
-            # If not found, try uppercase address to prevent case-mismatch cache failures
+            # 2. Standard cache check (uppercase)
             if not ble_device:
                 ble_device = async_ble_device_from_address(active_hass, self.ble_address.upper(), connectable=True)
             
+            # 3. Low-Signal Bypass: If the device is stale/dropped from main cache, force pull from scanner history
+            if not ble_device:
+                _LOGGER.debug("Device not in standard connectable cache. Attempting historical scanner lookup bypass...")
+                for scanner in async_get_scanner(active_hass):
+                    # Check the scanner's internal history memory for our target device
+                    discovered = scanner.discovered_devices_and_advertisement_data.get(self.ble_address.upper()) or \
+                                 scanner.discovered_devices_and_advertisement_data.get(self.ble_address.lower())
+                    if discovered:
+                        ble_device = discovered[0] # Extract the tracked BLEDevice object
+                        _LOGGER.debug(f"Bypass successful! Recovered device from scanner: {scanner.source}")
+                        break
+
             if not ble_device:
                 _LOGGER.error(f"Emerald device {self.ble_address} not discovered in HA Bluetooth cache. Signal is likely too weak (Last RSSI was borderline).")
                 self.is_connected = False
                 return False
 
-            _LOGGER.debug(f"Found device in HA Bluetooth cache (RSSI: {ble_device.rssi}). Securing connection via bleak-retry-connector.")
+            _LOGGER.debug(f"Found device (RSSI: {ble_device.rssi}). Securing connection via bleak-retry-connector.")
             
-            # establish_connection naturally manages local connection slots on HA host
             self.client = await establish_connection(
                 BleakClient,
                 ble_device,
