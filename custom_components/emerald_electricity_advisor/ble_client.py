@@ -3,14 +3,11 @@ import asyncio
 import logging
 from typing import Callable, Optional
 
-from bleak import BleakClient, BleakError, discover
+from bleak import BleakClient, BleakError
 
 from .const import (
     READ_CHAR_UUID,
     RETURN_30S_POWER_CONSUMPTION_CMD,
-    RETURN_UPDATED_POWER_CMD,
-    SET_AUTO_UPLOAD_STATUS_CMD,
-    TIME_SERVICE_UUID,
     WRITE_CHAR_UUID,
 )
 
@@ -40,16 +37,12 @@ class EmeraldBLEClient:
         try:
             _LOGGER.info(f"Attempting to connect to Emerald device at {self.ble_address}")
             
-            # Attempt connection
             self.client = BleakClient(self.ble_address, timeout=10.0)
             await self.client.connect()
             self.is_connected = True
             _LOGGER.info(f"Connected to Emerald device at {self.ble_address}")
 
-            # Enable auto-upload
             await self._enable_auto_upload()
-
-            # Subscribe to notifications
             await self._subscribe_to_notifications()
 
             return True
@@ -111,23 +104,19 @@ class EmeraldBLEClient:
         if len(data) < 11:
             return None
 
-        # Extract command header (first 5 bytes)
         command_header = 0
         for i in range(5):
             command_header += data[i] << (8 * (4 - i))
 
         command_hex = f"{command_header:010x}"
 
-        # Only process 30s power consumption updates
         if command_hex != RETURN_30S_POWER_CONSUMPTION_CMD:
             return None
 
-        # Parse timestamp (bytes 5-8)
         timestamp_bin = 0
         for i in range(5, 9):
             timestamp_bin += data[i] << (8 * (8 - i))
 
-        # Parse timestamp components
         year = 2000 + (timestamp_bin >> 26)
         month = (timestamp_bin >> 22) & 0xF
         day = (timestamp_bin >> 17) & 0x1F
@@ -135,12 +124,7 @@ class EmeraldBLEClient:
         minute = (timestamp_bin >> 6) & 0x3F
         second = timestamp_bin & 0x3F
 
-        # Extract pulses (bytes 9-10)
         pulses = (data[9] << 8) + data[10]
-
-        # Calculate power in watts
-        # power = (pulses / pulses_per_kwh) * 3600 * 1000 / 30
-        # Simplified: power = (pulses * 120000) / pulses_per_kwh
         power_watts = (pulses * 120000) / self.pulses_per_kwh
 
         return {
@@ -158,8 +142,8 @@ class EmeraldBLEClient:
         try:
             cmd = bytes.fromhex("0001020100")
             await self.client.write_gatt_char(WRITE_CHAR_UUID, cmd, response=False)
-            await asyncio.sleep(0.5)  # Wait for response
-            return None  # Will be populated via notification
+            await asyncio.sleep(0.5)
+            return None
         except BleakError as err:
             _LOGGER.error(f"Error getting power: {err}")
             return None
