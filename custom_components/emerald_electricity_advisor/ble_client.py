@@ -21,11 +21,11 @@ class EmeraldBLEClient:
 
     def __init__(
         self,
-        hass: HomeAssistant,
         ble_address: str,
         pairing_code: int,
         pulses_per_kwh: int,
         on_data_callback: Optional[Callable] = None,
+        hass: Optional[HomeAssistant] = None,  # Made optional and moved to the end
     ):
         """Initialize the BLE client."""
         self.hass = hass
@@ -41,14 +41,18 @@ class EmeraldBLEClient:
         try:
             _LOGGER.info(f"Attempting to connect to Emerald device at {self.ble_address}")
             
-            ble_device = async_ble_device_from_address(self.hass, self.ble_address, connectable=True)
+            ble_device = None
+            # Fallback gracefully if hass wasn't passed by the coordinator
+            if self.hass:
+                ble_device = async_ble_device_from_address(self.hass, self.ble_address, connectable=True)
             
-            if not ble_device:
-                _LOGGER.error(f"Emerald device {self.ble_address} not found in Home Assistant Bluetooth cache.")
-                self.is_connected = False
-                return False
+            if ble_device:
+                _LOGGER.debug("Found device in HA Bluetooth cache, using optimized connection.")
+                self.client = BleakClient(ble_device, timeout=10.0)
+            else:
+                _LOGGER.warning("Device not in HA cache or context missing. Falling back to direct MAC address connection.")
+                self.client = BleakClient(self.ble_address, timeout=10.0)
 
-            self.client = BleakClient(ble_device, timeout=10.0)
             await self.client.connect()
             self.is_connected = True
             _LOGGER.info(f"Connected to Emerald device at {self.ble_address}")
@@ -165,4 +169,3 @@ class EmeraldBLEClient:
         except BleakError as err:
             _LOGGER.error(f"Error getting power: {err}")
             return None
-            
