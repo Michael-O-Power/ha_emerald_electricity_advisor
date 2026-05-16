@@ -60,7 +60,6 @@ class EmeraldBLEClient:
             # 3. Low-Signal Bypass: Safely grab historical frames from all active physical scanners
             if not ble_device:
                 _LOGGER.debug("Device not in standard connectable cache. Attempting historical scanner lookup bypass...")
-                # async_current_scanners returns the actual list of physical trackers/proxies
                 for scanner in async_current_scanners(active_hass):
                     discovered = scanner.discovered_devices_and_advertisement_data.get(self.ble_address.upper()) or \
                                  scanner.discovered_devices_and_advertisement_data.get(self.ble_address.lower())
@@ -74,7 +73,8 @@ class EmeraldBLEClient:
                 self.is_connected = False
                 return False
 
-            _LOGGER.debug(f"Found device (RSSI: {ble_device.rssi}). Securing connection via bleak-retry-connector.")
+            # FIX: Removed the ble_device.rssi property call from the log statement to prevent object attribute crashes
+            _LOGGER.debug(f"Found device context in cache map. Securing connection via bleak-retry-connector.")
             
             self.client = await establish_connection(
                 BleakClient,
