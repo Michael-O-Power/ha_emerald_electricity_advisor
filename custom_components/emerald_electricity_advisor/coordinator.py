@@ -24,7 +24,17 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the data update coordinator."""
+        # 1. Initialize the parent coordinator first so 'hass' is fully attached to the class
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=timedelta(seconds=SCAN_INTERVAL),
+        )
+        
+        # 2. Pass the fully initialized hass context down into the client
         self.ble_client = EmeraldBLEClient(
+            hass=hass,
             ble_address=entry.data[CONF_BLE_ADDRESS],
             pairing_code=entry.data[CONF_PAIRING_CODE],
             pulses_per_kwh=entry.data[CONF_PULSES_PER_KWH],
@@ -38,18 +48,12 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
             "timestamp": None,
         }
 
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=SCAN_INTERVAL),
-        )
-
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from the device."""
         try:
             if not self.ble_client.is_connected:
-                if not await self.ble_client.connect():
+                # Pass hass context into the connect method during active runtime loop
+                if not await self.ble_client.connect(self.hass):
                     raise UpdateFailed("Failed to connect to Emerald device")
 
             # Get current power
@@ -66,3 +70,4 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
         self.data.update(data)
         # Notify listeners that data has been updated
         self.async_set_updated_data(self.data)
+        
