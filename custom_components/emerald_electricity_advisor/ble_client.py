@@ -85,9 +85,10 @@ class EmeraldBLEClient:
             self.is_connected = True
             _LOGGER.info(f"Connected to Emerald device at {self.ble_address}")
 
-            # Try to establish notifications first before writing commands
-            await self._subscribe_to_notifications()
+            # FIX: Authorize and authenticate FIRST before trying to touch the notification stream
             await self._enable_auto_upload()
+            await asyncio.sleep(1.0)  # Give firmware a moment to clear the authorization lock
+            await self._subscribe_to_notifications()
 
             return True
         except BleakError as err:
@@ -108,7 +109,6 @@ class EmeraldBLEClient:
         if self.client:
             try:
                 if self.is_connected:
-                    # Cleanly stop any existing notifications before closing down
                     try:
                         await self.client.stop_notify(READ_CHAR_UUID)
                     except Exception:
@@ -135,25 +135,30 @@ class EmeraldBLEClient:
             _LOGGER.warning(f"Failed to enable auto-upload: {err}")
 
     async def _subscribe_to_notifications(self) -> None:
-        """Subscribe to power consumption notifications with BlueZ lock workarounds."""
+        """Subscribe to power consumption notifications with an aggressive BlueZ release strategy."""
         if not self.client or not self.is_connected:
             return
-        try:
-            await self.client.start_notify(
-                READ_CHAR_UUID, self._notification_handler
-            )
-            _LOGGER.debug("Successfully subscribed to power notifications.")
-        except BleakError as err:
-            # FIX: Intercept the BlueZ conflict. If notifications are locked or bugged, toggle connection state
-            _LOGGER.warning(f"Initial notification subscription failed: {err}. Attempting connection cycle reset workaround...")
+        
+        # Try up to 3 times to break a stubborn BlueZ "NotPermitted" lock state
+        for attempt in range(1, 4):
             try:
-                # Force a manual notification clear/stop routine to drop BlueZ's lock
-                await self.client.stop_notify(READ_CHAR_UUID)
-                await asyncio.sleep(0.5)
+                _LOGGER.debug(f"Subscription attempt {attempt}/3 for READ_CHAR_UUID...")
                 await self.client.start_notify(READ_CHAR_UUID, self._notification_handler)
-                _LOGGER.info("Bypass successful: Subscribed to power notifications after connection cycle reset.")
-            except Exception as retry_err:
-                _LOGGER.error(f"Bypass failed. Unable to clear BlueZ notification lock: {retry_err}")
+                _LOGGER.info("Successfully subscribed to power notifications.")
+                return
+            except BleakError as err:
+                _LOGGER.warning(f"Notification subscription attempt {attempt} failed: {err}")
+                if "NotPermitted" in str(err) or "acquired" in str(err):
+                    try:
+                        # Actively command BlueZ to drop any ghost notification handles
+                        await self.client.stop_notify(READ_CHAR_UUID)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(1.5)  # Drop execution control briefly to let BlueZ reset the socket
+                else:
+                    break
+        
+        _LOGGER.error("Bypass failed. Completely unable to clear BlueZ notification lock structure.")
 
     def _notification_handler(self, sender, data: bytearray) -> None:
         """Handle notifications from the device."""
