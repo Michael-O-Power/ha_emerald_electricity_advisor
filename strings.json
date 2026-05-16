@@ -1,0 +1,28 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Emerald Electricity Advisor",
+        "description": "Set up your Emerald Electricity Advisor device",
+        "data": {
+          "ble_address": "BLE Address (e.g., 30:1B:97:01:02:03)",
+          "pairing_code": "Pairing Code (6 digits)",
+          "pulses_per_kwh": "Pulses per kWh (default: 1000)",
+          "name": "Device Name"
+        },
+        "data_description": {
+          "ble_address": "The Bluetooth address of your Emerald device (found on device sticker)",
+          "pairing_code": "Your 6-digit pairing PIN (last 6 digits of serial number)",
+          "pulses_per_kwh": "Your smart meter's pulse rate",
+          "name": "Friendly name for this device"
+        }
+      }
+    },
+    "error": {
+      "invalid_ble_address": "Invalid BLE address format. Use XX:XX:XX:XX:XX:XX"
+    },
+    "abort": {
+      "already_configured": "Device already configured"
+    }
+  }
+}
