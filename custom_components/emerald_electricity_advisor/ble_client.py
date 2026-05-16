@@ -4,8 +4,9 @@ import logging
 from typing import Callable, Optional
 
 from bleak import BleakClient, BleakError
+from bleak_retry_connector import establish_connection  # Fixes Error #2
 from homeassistant.components.bluetooth import async_ble_device_from_address
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, async_get_current_hass  # Fixes Error #1
 
 from .const import (
     READ_CHAR_UUID,
@@ -25,10 +26,16 @@ class EmeraldBLEClient:
         pairing_code: int,
         pulses_per_kwh: int,
         on_data_callback: Optional[Callable] = None,
-        hass: Optional[HomeAssistant] = None,  # Made optional and moved to the end
+        hass: Optional[HomeAssistant] = None,
     ):
         """Initialize the BLE client."""
-        self.hass = hass
+        # If hass wasn't passed by the coordinator, snatch the running instance directly from HA
+        try:
+            self.hass = hass or async_get_current_hass()
+        except RuntimeError:
+            self.hass = None
+            _LOGGER.warning("Could not automatically retrieve Home Assistant context framework.")
+
         self.ble_address = ble_address.lower()
         self.pairing_code = pairing_code
         self.pulses_per_kwh = pulses_per_kwh
@@ -42,18 +49,23 @@ class EmeraldBLEClient:
             _LOGGER.info(f"Attempting to connect to Emerald device at {self.ble_address}")
             
             ble_device = None
-            # Fallback gracefully if hass wasn't passed by the coordinator
             if self.hass:
                 ble_device = async_ble_device_from_address(self.hass, self.ble_address, connectable=True)
             
             if ble_device:
-                _LOGGER.debug("Found device in HA Bluetooth cache, using optimized connection.")
-                self.client = BleakClient(ble_device, timeout=10.0)
+                _LOGGER.debug("Found device in HA Bluetooth cache. Establishing robust retry connection.")
+                # Establish connection using HA's preferred retry wrapper (Fixes Errors #2 & #3)
+                self.client = await establish_connection(
+                    BleakClient,
+                    ble_device,
+                    name=f"Emerald {self.ble_address}",
+                    disconnected_callback=lambda client: setattr(self, "is_connected", False)
+                )
             else:
-                _LOGGER.warning("Device not in HA cache or context missing. Falling back to direct MAC address connection.")
+                _LOGGER.warning("Device not in HA cache. Falling back to direct MAC address connection.")
                 self.client = BleakClient(self.ble_address, timeout=10.0)
+                await self.client.connect()
 
-            await self.client.connect()
             self.is_connected = True
             _LOGGER.info(f"Connected to Emerald device at {self.ble_address}")
 
@@ -169,3 +181,4 @@ class EmeraldBLEClient:
         except BleakError as err:
             _LOGGER.error(f"Error getting power: {err}")
             return None
+            
