@@ -82,21 +82,14 @@ class EmeraldBLEClient:
                 disconnected_callback=lambda client: setattr(self, "is_connected", False)
             )
 
-            # FIX: Execute an active secure cryptographic pair sequence before manipulating characteristics
-            _LOGGER.info(f"Authenticating secure pairing bond with code: {self.pairing_code}")
-            try:
-                # Some OS platforms expect pairing parameters; we pass protection parameters safely
-                await self.client.pair(protection_level=2)
-                _LOGGER.info("Secure pairing bond established successfully with Emerald Advisor.")
-            except NotImplementedError:
-                _LOGGER.debug("Pairing routine not implemented on this host platform OS; continuing with direct encryption channels.")
-            except BleakError as pair_err:
-                _LOGGER.warning(f"Pairing handshake returned an optimization message (normal if already paired): {pair_err}")
-
             self.is_connected = True
             _LOGGER.info(f"Connected to Emerald device at {self.ble_address}")
 
-            # Establish the notifications and permissions under the paired connection
+            # FIX: Wait for the Linux OS to silently apply the trusted keys and complete service discovery
+            _LOGGER.debug("Waiting for OS to complete service discovery and secure encryption mapping...")
+            await asyncio.sleep(2.0)
+
+            # Establish the notifications and permissions under the securely trusted connection
             await self._subscribe_to_notifications()
             await self._enable_auto_upload()
 
