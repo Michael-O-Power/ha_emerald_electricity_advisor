@@ -1,0 +1,12 @@
+{
+  "manifest_version": 1,
+  "domain": "emerald_electricity_advisor",
+  "name": "Emerald Electricity Advisor",
+  "codeowners": ["@Michael-O-Power"],
+  "config_flow": true,
+  "documentation": "https://github.com/Michael-O-Power/ha_emerald_electricity_advisor",
+  "homeassistant": "2024.1.0",
+  "integration_type": "hub",
+  "requirements": ["bleak>=0.20.0"],
+  "version": "0.1.0"
+}
