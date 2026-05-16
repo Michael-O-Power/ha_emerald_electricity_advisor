@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import Callable, Optional
 
-from bleak import BleakClient, BleakError
+from bleak import BleakClient, BleakError, discover
 
 from .const import (
     READ_CHAR_UUID,
@@ -38,7 +38,26 @@ class EmeraldBLEClient:
     async def connect(self) -> bool:
         """Connect to the Emerald device."""
         try:
-            self.client = BleakClient(self.ble_address)
+            _LOGGER.info(f"Attempting to connect to Emerald device at {self.ble_address}")
+            
+            # Try to discover the device first
+            _LOGGER.debug("Scanning for available BLE devices...")
+            devices = await discover(timeout=5.0)
+            
+            device_found = False
+            _LOGGER.debug(f"Found {len(devices)} BLE devices:")
+            for device in devices:
+                _LOGGER.debug(f"  - {device.address}: {device.name}")
+                if device.address.lower() == self.ble_address:
+                    device_found = True
+                    _LOGGER.info(f"Found Emerald device: {device.name} ({device.address})")
+            
+            if not device_found:
+                _LOGGER.warning(f"Device {self.ble_address} not found in BLE scan")
+                _LOGGER.warning("Make sure the device is powered on and in range")
+            
+            # Attempt connection regardless (device might be cached)
+            self.client = BleakClient(self.ble_address, timeout=10.0)
             await self.client.connect()
             self.is_connected = True
             _LOGGER.info(f"Connected to Emerald device at {self.ble_address}")
@@ -52,6 +71,14 @@ class EmeraldBLEClient:
             return True
         except BleakError as err:
             _LOGGER.error(f"Failed to connect to Emerald device: {err}")
+            self.is_connected = False
+            return False
+        except asyncio.TimeoutError:
+            _LOGGER.error(f"Connection timeout to Emerald device at {self.ble_address}")
+            self.is_connected = False
+            return False
+        except Exception as err:
+            _LOGGER.error(f"Unexpected error connecting to Emerald device: {err}")
             self.is_connected = False
             return False
 
