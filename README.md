@@ -14,12 +14,21 @@ This is a custom Home Assistant integration to locally track real-time power con
 
 Before initiating the setup, ensure you have the following information:
 
-**1. The Passkey (Pairing Code)**
+**1. The MAC Address**
+
+You will need this twice: one to pair the dongle with your HA server, and once for the config in step 3.
+
+The easiest way to find this is in the Bluetooth settings of your existing device where you have been running the emerald app. Assuming you've successfully connected there, go to settings/bluetooth, find your sensor, hit the cog, abd down the bottom (on android) you'll see the mac address.
+<image src="/docs/Screenshot_20260517-150008~2.png" alt="Screen shot showing the mac address in android settings" />
+
+
+Alternatively, you can use a free Bluetooth scanner app on your phone (such as nRF Connect or LightBlue) while standing near the meter box to find the Emerald Advisor's MAC address before you begin.
+
+**2. The Passkey (Pairing Code)**
 Your 6-digit passkey is printed directly on the physical Emerald Advisor unit. Look for a sticker on the underside or along the side of the device.
 <image src="/docs/PXL_20260515_031703514~2.jpg" alt="Photo showing the location of the passkey on the underside/side of the unit" />
 
-**2. The MAC Address**
-You can discover the MAC address of your unit during the SSH pairing process (detailed in Step 1 below) by watching the terminal output when you run the `scan on` command. Alternatively, you can use a free Bluetooth scanner app on your phone (such as nRF Connect or LightBlue) while standing near the meter box to find the Emerald Advisor's MAC address before you begin.
+
 
 ---
 
