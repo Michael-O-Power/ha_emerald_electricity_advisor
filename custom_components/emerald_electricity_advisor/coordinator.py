@@ -59,7 +59,10 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
             # Get current power
             power = await self.ble_client.get_power()
             if power is not None:
-                self.data["power_watts"] = power
+                # Clone dict to bypass HA memory reference checks
+                new_data = dict(self.data)
+                new_data["power_watts"] = power
+                return new_data
 
             return self.data
         except Exception as err:
@@ -67,7 +70,9 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _on_device_data(self, data: Dict[str, Any]) -> None:
         """Handle data received from the device."""
-        self.data.update(data)
-        # Notify listeners that data has been updated
-        self.async_set_updated_data(self.data)
+        # FIX: Clone the dictionary to create a new object in memory. 
+        # This forces the HA state machine to trigger the UI redraw listeners!
+        new_data = dict(self.data)
+        new_data.update(data)
+        self.async_set_updated_data(new_data)
         
