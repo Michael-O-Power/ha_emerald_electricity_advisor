@@ -17,6 +17,8 @@ from .const import (
     WRITE_CHAR_UUID,
 )
 
+BATTERY_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -50,14 +52,11 @@ class EmeraldBLEClient:
 
             active_hass = hass or self.hass
             
-            # 1. Standard cache check (lowercase)
             ble_device = async_ble_device_from_address(active_hass, self.ble_address.lower(), connectable=True)
             
-            # 2. Standard cache check (uppercase)
             if not ble_device:
                 ble_device = async_ble_device_from_address(active_hass, self.ble_address.upper(), connectable=True)
             
-            # 3. Low-Signal Bypass
             if not ble_device:
                 _LOGGER.debug("Device not in standard connectable cache. Attempting historical scanner lookup bypass...")
                 for scanner in async_current_scanners(active_hass):
@@ -65,15 +64,12 @@ class EmeraldBLEClient:
                                  scanner.discovered_devices_and_advertisement_data.get(self.ble_address.lower())
                     if discovered:
                         ble_device = discovered[0]
-                        _LOGGER.debug(f"Bypass successful! Recovered device context from scanner source: {scanner.source}")
                         break
 
             if not ble_device:
                 _LOGGER.error(f"Emerald device {self.ble_address} not discovered in HA Bluetooth cache. Signal is likely too weak.")
                 self.is_connected = False
                 return False
-
-            _LOGGER.debug("Found device context in cache map. Securing connection via bleak-retry-connector.")
             
             self.client = await establish_connection(
                 BleakClient,
@@ -85,12 +81,14 @@ class EmeraldBLEClient:
             self.is_connected = True
             _LOGGER.info(f"Connected to Emerald device at {self.ble_address}")
 
-            # FIX: Wait for the Linux OS to silently apply the trusted keys and complete service discovery
-            _LOGGER.debug("Waiting for OS to complete service discovery and secure encryption mapping...")
-            await asyncio.sleep(2.0)
+            _LOGGER.debug("Waiting for OS to silently apply the trusted keys and complete service discovery...")
+            await asyncio.sleep(2.5)
 
-            # Establish the notifications and permissions under the securely trusted connection
+            # Establish the notification listener FIRST so we don't miss the initial data stream
             await self._subscribe_to_notifications()
+            await asyncio.sleep(1.0)
+            
+            # Trigger the device to start dumping energy payloads
             await self._enable_auto_upload()
 
             return True
@@ -167,7 +165,6 @@ class EmeraldBLEClient:
         try:
             parsed_data = self._parse_notification(data)
             if parsed_data and self.on_data_callback:
-                _LOGGER.info(f"Parsed updates matching sensor keys: {parsed_data}")
                 self.on_data_callback(parsed_data)
         except Exception as err:
             _LOGGER.error(f"Error parsing notification: {err}")
@@ -220,4 +217,19 @@ class EmeraldBLEClient:
         except BleakError as err:
             _LOGGER.error(f"Error getting power: {err}")
             return None
-            
+
+    async def get_battery(self) -> Optional[int]:
+        """Read the standard BLE battery characteristic."""
+        if not self.is_connected or not self.client:
+            return None
+
+        try:
+            battery_data = await self.client.read_gatt_char(BATTERY_CHAR_UUID)
+            if battery_data:
+                # The battery level is broadcast as a single hex byte (0-100)
+                return int(battery_data[0])
+            return None
+        except BleakError as err:
+            _LOGGER.error(f"Error getting battery level: {err}")
+            return None
+        
