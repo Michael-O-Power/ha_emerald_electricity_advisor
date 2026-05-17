@@ -4,11 +4,24 @@
 
 This is a custom Home Assistant integration to locally track real-time power consumption, long-term energy accumulation, and battery levels from the Emerald Electricity Advisor via Bluetooth Low Energy (BLE).
 
-**Created by copilot and debugged by Gemini.**
+*Created by copilot and debugged by Gemini. Note: Initial development relied on foundational work and reverse-engineering from the existing GitHub `emerald_electricity_advisor` repo.*
 
 <image src="/docs/Screenshot_20260517-135600.png" /> <image src="/docs/Screenshot_20260517-142433.png" /> <image src="/docs/Screenshot_20260517-142458.png" /> <image src="/docs/Screenshot_20260517-142515.png" />
 
-## Installation 
+---
+
+## 🔍 Finding Your Device Details
+
+Before initiating the setup, ensure you have the following information:
+
+**1. The Passkey (Pairing Code)**
+Your 6-digit passkey is printed directly on the physical Emerald Advisor unit. Look for a sticker on the underside or along the side of the device.
+<image src="/docs/PXL_20260515_031703514~2.jpg" alt="Photo showing the location of the passkey on the underside/side of the unit" />
+
+**2. The MAC Address**
+You can discover the MAC address of your unit during the SSH pairing process (detailed in Step 1 below) by watching the terminal output when you run the `scan on` command. Alternatively, you can use a free Bluetooth scanner app on your phone (such as nRF Connect or LightBlue) while standing near the meter box to find the Emerald Advisor's MAC address before you begin.
+
+---
 
 ## ⚠️ Critical Prerequisite: Mobile App Contention
 The Emerald Electricity Advisor hardware only supports **one active Bluetooth connection at a time**. 
@@ -96,12 +109,9 @@ exit
 
 ## ⚙️ Step 3: UI Setup
 
-⚠️ For the smoothest setup, ensure you've connected and trusted the device prior to setting up the integration within home assistant.
+⚠️ For the smoothest setup, ensure you've connected and trusted the device prior to setting up the integration within Home Assistant.
 
 1. Go to **Settings > Devices & Services**.
 2. Click **Add Integration** and search for **Emerald Electricity Advisor**.
 3. Enter your MAC address, Passkey, and Pulses per kWh when prompted.
 4. Click Submit.
-
-
-
