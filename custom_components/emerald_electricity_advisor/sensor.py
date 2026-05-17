@@ -8,7 +8,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy, UnitOfPower
+from homeassistant.const import UnitOfEnergy, UnitOfPower, PERCENTAGE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -33,6 +33,7 @@ async def async_setup_entry(
         EmeraldPowerSensor(coordinator, config_entry),
         EmeraldEnergySensor(coordinator, config_entry),
         EmeraldPulsesSensor(coordinator, config_entry),
+        EmeraldBatterySensor(coordinator, config_entry),
     ]
 
     async_add_entities(sensors)
@@ -72,7 +73,6 @@ class EmeraldPowerSensor(EmeraldSensorBase):
         """Initialize the power sensor."""
         super().__init__(coordinator, config_entry)
         self._attr_name = "Power"
-        # FIX: Explicit unique ID construction without pulling missing entity descriptions
         self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_power"
         self._attr_device_class = SensorDeviceClass.POWER
         self._attr_native_unit_of_measurement = UnitOfPower.WATT
@@ -96,7 +96,6 @@ class EmeraldEnergySensor(EmeraldSensorBase):
         """Initialize the energy sensor."""
         super().__init__(coordinator, config_entry)
         self._attr_name = "Energy"
-        # FIX: Explicit unique ID construction
         self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_energy"
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -120,7 +119,6 @@ class EmeraldPulsesSensor(EmeraldSensorBase):
         """Initialize the pulses sensor."""
         super().__init__(coordinator, config_entry)
         self._attr_name = "Pulses"
-        # FIX: Explicit unique ID construction
         self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_pulses"
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_icon = "mdi:pulse"
@@ -129,4 +127,26 @@ class EmeraldPulsesSensor(EmeraldSensorBase):
     def native_value(self) -> StateType:
         """Return the state."""
         return self.coordinator.data.get("pulses")
+
+
+class EmeraldBatterySensor(EmeraldSensorBase):
+    """Sensor for battery level."""
+
+    def __init__(
+        self,
+        coordinator: EmeraldDataUpdateCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        """Initialize the battery sensor."""
+        super().__init__(coordinator, config_entry)
+        self._attr_name = "Battery"
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_battery"
+        self._attr_device_class = SensorDeviceClass.BATTERY
+        self._attr_native_unit_of_measurement = PERCENTAGE
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the state."""
+        return self.coordinator.data.get("battery_level")
         
