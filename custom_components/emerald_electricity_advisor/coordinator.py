@@ -48,6 +48,7 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
             "power_watts": 0,
             "energy_kwh": 0.0,
             "pulses": 0,
+            "battery_level": None,
             "timestamp": None,
         }
 
@@ -58,19 +59,24 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
                 if not await self.ble_client.connect(self.hass):
                     raise UpdateFailed("Failed to connect to Emerald device")
 
-            # Get current power
+            # Get current power and battery
             power = await self.ble_client.get_power()
+            battery = await self.ble_client.get_battery()
+            
+            new_data = dict(self.data)
             if power is not None:
-                new_data = dict(self.data)
                 new_data["power_watts"] = power
-                return new_data
+            if battery is not None:
+                new_data["battery_level"] = battery
+                
+            return new_data
 
-            return self.data
         except Exception as err:
             raise UpdateFailed(f"Error communicating with Emerald device: {err}")
 
     def _on_device_data(self, data: Dict[str, Any]) -> None:
         """Handle data received from the device."""
+        # Clone the dictionary to create a new object in memory, bypassing HA reference checks
         new_data = dict(self.data)
         
         # The device broadcasts energy/pulses consumed in a 30-second window.
