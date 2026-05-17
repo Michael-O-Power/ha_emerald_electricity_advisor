@@ -9,6 +9,6 @@
   "integration_type": "hub",
   "dependencies": ["bluetooth"],
   "requirements": ["bleak>=0.20.0"],
-  "version": "1.0.1",
+  "version": "1.0.5",
   "icon": "icon.png"
 }
