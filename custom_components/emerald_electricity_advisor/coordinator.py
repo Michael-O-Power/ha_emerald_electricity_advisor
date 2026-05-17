@@ -24,7 +24,6 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the data update coordinator."""
-        # 1. Initialize the parent coordinator first so 'hass' is fully attached to the class
         super().__init__(
             hass,
             _LOGGER,
@@ -32,7 +31,6 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=SCAN_INTERVAL),
         )
         
-        # 2. Pass the fully initialized hass context down into the client
         self.ble_client = EmeraldBLEClient(
             hass=hass,
             ble_address=entry.data[CONF_BLE_ADDRESS],
@@ -41,9 +39,14 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
             on_data_callback=self._on_device_data,
         )
         self.entry = entry
+        
+        # Initialize running totals to satisfy HA's TOTAL_INCREASING state class requirements
+        self.total_pulses = 0
+        self.total_energy_kwh = 0.0
+        
         self.data: Dict[str, Any] = {
             "power_watts": 0,
-            "energy_kwh": 0,
+            "energy_kwh": 0.0,
             "pulses": 0,
             "timestamp": None,
         }
@@ -52,14 +55,12 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
         """Fetch data from the device."""
         try:
             if not self.ble_client.is_connected:
-                # Pass hass context into the connect method during active runtime loop
                 if not await self.ble_client.connect(self.hass):
                     raise UpdateFailed("Failed to connect to Emerald device")
 
             # Get current power
             power = await self.ble_client.get_power()
             if power is not None:
-                # Clone dict to bypass HA memory reference checks
                 new_data = dict(self.data)
                 new_data["power_watts"] = power
                 return new_data
@@ -70,9 +71,23 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _on_device_data(self, data: Dict[str, Any]) -> None:
         """Handle data received from the device."""
-        # FIX: Clone the dictionary to create a new object in memory. 
-        # This forces the HA state machine to trigger the UI redraw listeners!
         new_data = dict(self.data)
-        new_data.update(data)
+        
+        # The device broadcasts energy/pulses consumed in a 30-second window.
+        # We accumulate these into a running tally for the long-term statistics database.
+        if "pulses" in data:
+            self.total_pulses += data["pulses"]
+            new_data["pulses"] = self.total_pulses
+            
+        if "energy_kwh" in data:
+            self.total_energy_kwh += data["energy_kwh"]
+            new_data["energy_kwh"] = self.total_energy_kwh
+            
+        if "power_watts" in data:
+            new_data["power_watts"] = data["power_watts"]
+            
+        if "timestamp" in data:
+            new_data["timestamp"] = data["timestamp"]
+
         self.async_set_updated_data(new_data)
         
