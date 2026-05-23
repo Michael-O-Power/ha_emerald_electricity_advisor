@@ -21,6 +21,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = EmeraldDataUpdateCoordinator(hass, entry)
 
+    # Await the first manual refresh to establish the initial BLE connection
     await coordinator.async_config_entry_first_refresh()
 
     if not coordinator.last_update_success:
@@ -36,6 +37,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data["emerald_electricity_advisor"].pop(entry.entry_id)
+        coordinator = hass.data["emerald_electricity_advisor"].pop(entry.entry_id)
+        if coordinator:
+            await coordinator.async_shutdown()
 
     return unload_ok
