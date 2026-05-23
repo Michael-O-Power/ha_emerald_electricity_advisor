@@ -79,7 +79,7 @@ class EmeraldSensorBase(CoordinatorEntity, SensorEntity):
         super()._handle_coordinator_update()
 
 
-class EmeraldPowerSensor(EmeraldSensorBase):
+class EmeraldPowerSensor(EmeraldSensorBase, RestoreEntity):
     """Sensor for live power consumption."""
 
     def __init__(
@@ -96,8 +96,18 @@ class EmeraldPowerSensor(EmeraldSensorBase):
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_icon = "mdi:lightning-bolt"
 
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known power reading on startup."""
+        await super().async_added_to_hass()
+        if (old_state := await self.async_get_last_state()) is not None:
+            try:
+                if old_state.state not in (None, "unknown", "unavailable"):
+                    self._attr_native_value = float(old_state.state)
+            except (ValueError, TypeError):
+                pass
 
-class EmeraldEnergySensor(EmeraldSensorBase):
+
+class EmeraldEnergySensor(EmeraldSensorBase, RestoreEntity):
     """Sensor for lifetime energy consumption."""
 
     def __init__(
@@ -114,8 +124,25 @@ class EmeraldEnergySensor(EmeraldSensorBase):
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_icon = "mdi:lightning-bolt-circle"
 
+    async def async_added_to_hass(self) -> None:
+        """Restore the lifetime energy reading and seed the coordinator."""
+        await super().async_added_to_hass()
+        if (old_state := await self.async_get_last_state()) is not None:
+            try:
+                if old_state.state not in (None, "unknown", "unavailable"):
+                    restored_value = float(old_state.state)
+                    self._attr_native_value = restored_value
+                    
+                    # Inject this lifetime total back into the coordinator tally
+                    if restored_value > self.coordinator.total_energy_kwh:
+                        self.coordinator.total_energy_kwh = restored_value
+                        if self.coordinator.data is not None:
+                            self.coordinator.data["energy_kwh"] = restored_value
+            except (ValueError, TypeError):
+                pass
 
-class EmeraldPulsesSensor(EmeraldSensorBase):
+
+class EmeraldPulsesSensor(EmeraldSensorBase, RestoreEntity):
     """Sensor for lifetime pulse count."""
 
     def __init__(
@@ -130,8 +157,25 @@ class EmeraldPulsesSensor(EmeraldSensorBase):
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_icon = "mdi:pulse"
 
+    async def async_added_to_hass(self) -> None:
+        """Restore the lifetime pulse count and seed the coordinator."""
+        await super().async_added_to_hass()
+        if (old_state := await self.async_get_last_state()) is not None:
+            try:
+                if old_state.state not in (None, "unknown", "unavailable"):
+                    restored_value = float(old_state.state)
+                    self._attr_native_value = restored_value
+                    
+                    # Inject this lifetime total back into the coordinator tally
+                    if restored_value > self.coordinator.total_pulses:
+                        self.coordinator.total_pulses = restored_value
+                        if self.coordinator.data is not None:
+                            self.coordinator.data["pulses"] = restored_value
+            except (ValueError, TypeError):
+                pass
 
-class EmeraldBatterySensor(EmeraldSensorBase):
+
+class EmeraldBatterySensor(EmeraldSensorBase, RestoreEntity):
     """Sensor for battery level."""
 
     def __init__(
@@ -146,6 +190,16 @@ class EmeraldBatterySensor(EmeraldSensorBase):
         self._attr_device_class = SensorDeviceClass.BATTERY
         self._attr_native_unit_of_measurement = PERCENTAGE
         self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known battery reading."""
+        await super().async_added_to_hass()
+        if (old_state := await self.async_get_last_state()) is not None:
+            try:
+                if old_state.state not in (None, "unknown", "unavailable"):
+                    self._attr_native_value = int(float(old_state.state))
+            except (ValueError, TypeError):
+                pass
 
 
 class EmeraldEnergyTodaySensor(EmeraldSensorBase, RestoreEntity):
