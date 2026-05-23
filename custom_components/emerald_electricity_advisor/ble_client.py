@@ -25,13 +25,8 @@ _LOGGER = logging.getLogger(__name__)
 class EmeraldBLEClient:
     """BLE Client for Emerald Electricity Advisor."""
 
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        ble_address: str,
-        pairing_code: int,
-        pulses_per_kwh: int,
-        on_data_callback: Optional[Callable] = None,
+    def __init__(self, hass: HomeAssistant, ble_address: str, pairing_code: int, pulses_per_kwh: int, on_data_callback: Optional[Callable] = None,
+        on_disconnect_callback: Optional[Callable] = None,
     ):
         """Initialize the BLE client."""
         self.hass = hass
@@ -39,8 +34,18 @@ class EmeraldBLEClient:
         self.pairing_code = pairing_code
         self.pulses_per_kwh = pulses_per_kwh
         self.on_data_callback = on_data_callback
+        self.on_disconnect_callback = on_disconnect_callback
         self.client: Optional[BleakClient] = None
         self.is_connected = False
+
+    def _handle_client_disconnect(self, client: BleakClient) -> None:
+        """Handle physical disconnections from the Bleak client."""
+        _LOGGER.warning(f"Physical BLE connection lost for {self.ble_address}.")
+        self.is_connected = False
+        
+        # Fire the callback to tell the coordinator to mark entities as Unavailable
+        if self.on_disconnect_callback:
+            self.on_disconnect_callback()
 
     async def connect(self, hass: Optional[HomeAssistant] = None) -> bool:
         """Connect to the Emerald device using Home Assistant's tracking framework."""
@@ -75,7 +80,7 @@ class EmeraldBLEClient:
                 BleakClient,
                 ble_device,
                 name=f"Emerald_{self.ble_address}",
-                disconnected_callback=lambda client: setattr(self, "is_connected", False)
+                disconnected_callback=self._handle_client_disconnect,  # Fixed mismatch here
             )
 
             self.is_connected = True
@@ -232,4 +237,3 @@ class EmeraldBLEClient:
         except BleakError as err:
             _LOGGER.error(f"Error getting battery level: {err}")
             return None
-        
