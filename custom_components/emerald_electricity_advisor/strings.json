@@ -3,16 +3,14 @@
     "step": {
       "user": {
         "title": "Connect to Emerald Electricity Advisor",
-        "description": "Set up your Emerald Electricity Advisor device",
+        "description": "Set up your Emerald Electricity Advisor.\n\n⚠️ **IMPORTANT**: Because this device requires a secure 6-digit passkey, you MUST pair it with your host operating system using `bluetoothctl` before completing this setup. If it is not paired at the OS level first, the connection will fail.",
         "data": {
           "ble_address": "BLE Address (e.g., 30:1B:97:01:02:03)",
-          "pairing_code": "Pairing Code (6 digits)",
           "pulses_per_kwh": "Pulses per kWh (default: 1000)",
           "name": "Device Name"
         },
         "data_description": {
           "ble_address": "The Bluetooth address of your Emerald device (found on device sticker)",
-          "pairing_code": "Your 6-digit pairing PIN (last 6 digits of serial number)",
           "pulses_per_kwh": "Your smart meter's pulse rate",
           "name": "Friendly name for this device"
         }

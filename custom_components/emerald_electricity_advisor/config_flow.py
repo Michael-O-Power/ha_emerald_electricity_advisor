@@ -9,7 +9,6 @@ from homeassistant.data_entry_flow import FlowResult
 from .const import (
     CONF_BLE_ADDRESS,
     CONF_NAME,
-    CONF_PAIRING_CODE,
     CONF_PULSES_PER_KWH,
     DEFAULT_NAME,
     DEFAULT_PULSES_PER_KWH,
@@ -23,7 +22,7 @@ class EmeraldConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Emerald Electricity Advisor."""
 
     VERSION = 1
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
+    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
 
     async def async_step_user(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -45,7 +44,6 @@ class EmeraldConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     title=user_input.get(CONF_NAME, DEFAULT_NAME),
                     data={
                         CONF_BLE_ADDRESS: ble_address,
-                        CONF_PAIRING_CODE: user_input[CONF_PAIRING_CODE],
                         CONF_PULSES_PER_KWH: user_input.get(
                             CONF_PULSES_PER_KWH, DEFAULT_PULSES_PER_KWH
                         ),
@@ -53,10 +51,10 @@ class EmeraldConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 )
 
+        # Pairing code removed in favor of OS-level bluetoothctl bonding
         data_schema = vol.Schema(
             {
                 vol.Required(CONF_BLE_ADDRESS): str,
-                vol.Required(CONF_PAIRING_CODE): int,
                 vol.Optional(CONF_PULSES_PER_KWH, default=DEFAULT_PULSES_PER_KWH): int,
                 vol.Optional(CONF_NAME, default=DEFAULT_NAME): str,
             }

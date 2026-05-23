@@ -5,48 +5,51 @@ from typing import Any, Dict
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.util import dt as dt_util
 
 from .ble_client import EmeraldBLEClient
 from .const import (
     CONF_BLE_ADDRESS,
-    CONF_PAIRING_CODE,
     CONF_PULSES_PER_KWH,
     DOMAIN,
-    SCAN_INTERVAL,
+    WATCHDOG_INTERVAL,
+    BATTERY_SCAN_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
-    """Class to manage fetching Emerald data."""
+    """Class to manage push-based data from the Emerald device."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize the data update coordinator."""
+        """Initialize the push coordinator."""
+        # Setting update_interval to None disables the polling loop.
+        # We rely exclusively on the device pushing data to us.
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=SCAN_INTERVAL),
+            update_interval=None,
         )
 
-        # Track the last time we received pushed data
         self.last_data_received = None
+        self.entry = entry
 
         self.ble_client = EmeraldBLEClient(
             hass=hass,
             ble_address=entry.data[CONF_BLE_ADDRESS],
-            pairing_code=entry.data[CONF_PAIRING_CODE],
             pulses_per_kwh=entry.data[CONF_PULSES_PER_KWH],
             on_data_callback=self._on_device_data,
             on_disconnect_callback=self._on_disconnect, 
         )
         
-        self.entry = entry
+        # Tracking listeners
+        self._unsub_watchdog = None
+        self._unsub_battery = None
         
-        # Initialize running totals to satisfy HA's TOTAL_INCREASING state class requirements
         self.total_pulses = 0
         self.total_energy_kwh = 0.0
         
@@ -59,56 +62,62 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
         }
 
     async def _async_update_data(self) -> Dict[str, Any]:
-        """Fetch data from the device."""
-        # --- WATCHDOG LOGIC ---
-        if self.last_data_received is not None:
-            time_since_last = (dt_util.utcnow() - self.last_data_received).total_seconds()
-            if time_since_last > 90:
-                _LOGGER.error("Watchdog tripped: No data from Emerald for %s seconds. Force killing connection.", time_since_last)
-                
-                # Forcefully kill the zombie connection (requires a disconnect method in ble_client.py)
-                if self.ble_client.is_connected:
-                    await self.ble_client.disconnect()
-                
-                # Reset the timer so we don't spam the logs
-                self.last_data_received = None 
-                
-                # Raising UpdateFailed automatically marks entities as Unavailable
-                raise UpdateFailed("Watchdog timeout: No data received for 90 seconds")
-        # ---------------------------
-
+        """Fetch initial data and establish the persistent BLE connection."""
         try:
             if not self.ble_client.is_connected:
                 if not await self.ble_client.connect(self.hass):
                     raise UpdateFailed("Failed to connect to Emerald device")
 
-            # Get current power and battery
-            power = await self.ble_client.get_power()
+            # Setup background protection tasks now that we are connected
+            if not self._unsub_watchdog:
+                self._unsub_watchdog = async_track_time_interval(
+                    self.hass, self._async_watchdog_check, timedelta(seconds=WATCHDOG_INTERVAL)
+                )
+            if not self._unsub_battery:
+                self._unsub_battery = async_track_time_interval(
+                    self.hass, self._async_update_battery, timedelta(seconds=BATTERY_SCAN_INTERVAL)
+                )
+
+            # Grab an initial baseline battery read
             battery = await self.ble_client.get_battery()
-            
-            new_data = dict(self.data)
-            if power is not None:
-                new_data["power_watts"] = power
             if battery is not None:
-                new_data["battery_level"] = battery
+                self.data["battery_level"] = battery
                 
-            return new_data
+            return self.data
 
         except Exception as err:
             raise UpdateFailed(f"Error communicating with Emerald device: {err}")
 
+    async def _async_watchdog_check(self, now: Any) -> None:
+        """Independent loop to verify the push stream hasn't died silently."""
+        if self.last_data_received is not None:
+            time_since_last = (dt_util.utcnow() - self.last_data_received).total_seconds()
+            if time_since_last > 90:
+                _LOGGER.error(f"Watchdog tripped: No data from Emerald for {time_since_last} seconds. Forcing reconnect.")
+                
+                if self.ble_client.is_connected:
+                    await self.ble_client.disconnect()
+                
+                self.last_data_received = None 
+                self._on_disconnect()
+                
+                # Attempt to restart the connection in the background
+                self.hass.async_create_task(self.ble_client.connect(self.hass))
+
+    async def _async_update_battery(self, now: Any) -> None:
+        """Infrequent battery poll to save device lifespan."""
+        if self.ble_client.is_connected:
+            battery = await self.ble_client.get_battery()
+            if battery is not None:
+                new_data = dict(self.data)
+                new_data["battery_level"] = battery
+                self.async_set_updated_data(new_data)
+
     def _on_device_data(self, data: Dict[str, Any]) -> None:
-        """Handle data received from the device."""
-
-        # Reset the watchdog timer on every successful data push
+        """Handle pushed data from the Bleak background thread."""
         self.last_data_received = dt_util.utcnow()
-
-
-        # Clone the dictionary to create a new object in memory, bypassing HA reference checks
         new_data = dict(self.data)
         
-        # The device broadcasts energy/pulses consumed in a 30-second window.
-        # We accumulate these into a running tally for the long-term statistics database.
         if "pulses" in data:
             self.total_pulses += data["pulses"]
             new_data["pulses"] = self.total_pulses
@@ -123,14 +132,20 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
         if "timestamp" in data:
             new_data["timestamp"] = data["timestamp"]
 
-        self.async_set_updated_data(new_data)
+        # Safely hand the update back to the main Home Assistant event loop
+        self.hass.loop.call_soon_threadsafe(self.async_set_updated_data, new_data)
         
     def _on_disconnect(self) -> None:
-        """Handle physical BLE disconnection triggered by the client."""
-        _LOGGER.warning("Emerald Advisor physically disconnected!")
-        
-        # Manually flag the coordinator as failed
+        """Handle physical BLE disconnection safely."""
         self.last_update_success = False
-        
-        # Force HA to immediately push the 'Unavailable' state to all sensors
-        self.async_update_listeners()
+        self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
+
+    async def async_shutdown(self) -> None:
+        """Clean up tasks and connection on integration unload."""
+        if self._unsub_watchdog:
+            self._unsub_watchdog()
+        if self._unsub_battery:
+            self._unsub_battery()
+            
+        if self.ble_client.is_connected:
+            await self.ble_client.disconnect()

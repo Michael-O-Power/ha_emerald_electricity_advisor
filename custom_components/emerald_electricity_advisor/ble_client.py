@@ -15,6 +15,7 @@ from .const import (
     READ_CHAR_UUID,
     RETURN_30S_POWER_CONSUMPTION_CMD,
     WRITE_CHAR_UUID,
+    SET_AUTO_UPLOAD_STATUS_CMD,
 )
 
 BATTERY_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
@@ -25,13 +26,17 @@ _LOGGER = logging.getLogger(__name__)
 class EmeraldBLEClient:
     """BLE Client for Emerald Electricity Advisor."""
 
-    def __init__(self, hass: HomeAssistant, ble_address: str, pairing_code: int, pulses_per_kwh: int, on_data_callback: Optional[Callable] = None,
+    def __init__(
+        self, 
+        hass: HomeAssistant, 
+        ble_address: str, 
+        pulses_per_kwh: int, 
+        on_data_callback: Optional[Callable] = None,
         on_disconnect_callback: Optional[Callable] = None,
     ):
         """Initialize the BLE client."""
         self.hass = hass
         self.ble_address = ble_address.lower()
-        self.pairing_code = pairing_code
         self.pulses_per_kwh = pulses_per_kwh
         self.on_data_callback = on_data_callback
         self.on_disconnect_callback = on_disconnect_callback
@@ -43,7 +48,7 @@ class EmeraldBLEClient:
         _LOGGER.warning(f"Physical BLE connection lost for {self.ble_address}.")
         self.is_connected = False
         
-        # Fire the callback to tell the coordinator to mark entities as Unavailable
+        # Fire the callback to flag the coordinator
         if self.on_disconnect_callback:
             self.on_disconnect_callback()
 
@@ -76,11 +81,12 @@ class EmeraldBLEClient:
                 self.is_connected = False
                 return False
             
+            # Relies on the OS-level bonding established by bluetoothctl
             self.client = await establish_connection(
                 BleakClient,
                 ble_device,
                 name=f"Emerald_{self.ble_address}",
-                disconnected_callback=self._handle_client_disconnect,  # Fixed mismatch here
+                disconnected_callback=self._handle_client_disconnect,
             )
 
             self.is_connected = True
@@ -89,11 +95,9 @@ class EmeraldBLEClient:
             _LOGGER.debug("Waiting for OS to silently apply the trusted keys and complete service discovery...")
             await asyncio.sleep(2.5)
 
-            # Establish the notification listener FIRST so we don't miss the initial data stream
             await self._subscribe_to_notifications()
             await asyncio.sleep(1.0)
             
-            # Trigger the device to start dumping energy payloads
             await self._enable_auto_upload()
 
             return True
@@ -128,28 +132,26 @@ class EmeraldBLEClient:
                 self.client = None
 
     async def _enable_auto_upload(self) -> None:
-        """Enable automatic power data upload from the device."""
+        """Tell the device to automatically push power data every 30 seconds."""
         if not self.client or not self.is_connected:
             return
         try:
-            enable_auto_upload = bytes.fromhex("0001020b0101")
             await self.client.write_gatt_char(
-                WRITE_CHAR_UUID, enable_auto_upload, response=False
+                WRITE_CHAR_UUID, SET_AUTO_UPLOAD_STATUS_CMD, response=False
             )
             _LOGGER.debug("Auto-upload enabled command written successfully.")
         except BleakError as err:
             _LOGGER.warning(f"Failed to enable auto-upload: {err}")
 
     async def _subscribe_to_notifications(self) -> None:
-        """Subscribe to power consumption notifications with an aggressive BlueZ release strategy."""
+        """Subscribe to power consumption notifications."""
         if not self.client or not self.is_connected:
             return
         
         for attempt in range(1, 4):
             try:
-                _LOGGER.debug(f"Subscription attempt {attempt}/3 for READ_CHAR_UUID...")
                 await self.client.start_notify(READ_CHAR_UUID, self._notification_handler)
-                _LOGGER.info("Successfully subscribed to power notifications.")
+                _LOGGER.info("Successfully subscribed to push notifications.")
                 return
             except BleakError as err:
                 _LOGGER.warning(f"Notification subscription attempt {attempt} failed: {err}")
@@ -165,8 +167,7 @@ class EmeraldBLEClient:
         _LOGGER.error("Bypass failed. Completely unable to clear BlueZ notification lock structure.")
 
     def _notification_handler(self, sender, data: bytearray) -> None:
-        """Handle notifications from the device."""
-        _LOGGER.debug(f"Raw BLE frame intercepted from advisor: {data.hex()}")
+        """Handle synchronous callback from the Bleak background thread."""
         try:
             parsed_data = self._parse_notification(data)
             if parsed_data and self.on_data_callback:
@@ -175,7 +176,7 @@ class EmeraldBLEClient:
             _LOGGER.error(f"Error parsing notification: {err}")
 
     def _parse_notification(self, data: bytearray) -> Optional[dict]:
-        """Parse incoming notification data."""
+        """Parse the raw 30-second payload broadcast."""
         if len(data) < 11:
             return None
 
@@ -209,29 +210,14 @@ class EmeraldBLEClient:
             "energy_kwh": pulses / self.pulses_per_kwh,
         }
 
-    async def get_power(self) -> Optional[float]:
-        """Get current power consumption."""
-        if not self.is_connected or not self.client:
-            return None
-
-        try:
-            cmd = bytes.fromhex("0001020100")
-            await self.client.write_gatt_char(WRITE_CHAR_UUID, cmd, response=False)
-            await asyncio.sleep(0.5)
-            return None
-        except BleakError as err:
-            _LOGGER.error(f"Error getting power: {err}")
-            return None
-
     async def get_battery(self) -> Optional[int]:
-        """Read the standard BLE battery characteristic."""
+        """Read the BLE battery characteristic. Done rarely to save device battery."""
         if not self.is_connected or not self.client:
             return None
 
         try:
             battery_data = await self.client.read_gatt_char(BATTERY_CHAR_UUID)
             if battery_data:
-                # The battery level is broadcast as a single hex byte (0-100)
                 return int(battery_data[0])
             return None
         except BleakError as err:
