@@ -1,13 +1,20 @@
 {
-  "manifest_version": 1,
   "domain": "emerald_electricity_advisor",
   "name": "Emerald Electricity Advisor",
-  "codeowners": ["@Michael-O-Power"],
+  "codeowners": [
+    "@Michael-O-Power"
+  ],
   "config_flow": true,
+  "dependencies": [
+    "bluetooth"
+  ],
   "documentation": "https://github.com/Michael-O-Power/ha_emerald_electricity_advisor",
-  "homeassistant": "2024.1.0",
   "integration_type": "hub",
-  "dependencies": ["bluetooth"],
-  "requirements": ["bleak>=0.20.0"],
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/Michael-O-Power/ha_emerald_electricity_advisor/issues",
+  "manifest_version": 1,
+  "requirements": [
+    "bleak>=0.20.0"
+  ],
   "version": "1.1.3"
 }
