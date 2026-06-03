@@ -12,7 +12,6 @@
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/Michael-O-Power/ha_emerald_electricity_advisor/issues",
-  "manifest_version": 1,
   "requirements": [
     "bleak>=0.20.0"
   ],
