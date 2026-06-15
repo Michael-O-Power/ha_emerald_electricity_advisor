@@ -1,9 +1,10 @@
+ 
 """Data update coordinator for Emerald Electricity Advisor."""
 import logging
 from datetime import timedelta
 from typing import Any, Dict
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.config_entries import ConfigEntry
@@ -16,6 +17,7 @@ from .const import (
     DOMAIN,
     WATCHDOG_INTERVAL,
     BATTERY_SCAN_INTERVAL,
+    HEARTBEAT_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,8 +28,6 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the push coordinator."""
-        # Setting update_interval to None disables the polling loop.
-        # We rely exclusively on the device pushing data to us.
         super().__init__(
             hass,
             _LOGGER,
@@ -49,6 +49,7 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
         # Tracking listeners
         self._unsub_watchdog = None
         self._unsub_battery = None
+        self._unsub_heartbeat = None
         
         self.total_pulses = 0
         self.total_energy_kwh = 0.0
@@ -68,15 +69,19 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
                 if not await self.ble_client.connect(self.hass):
                     raise UpdateFailed("Failed to connect to Emerald device")
 
-            # Setup background protection tasks now that we are connected
-            if not self._unsub_watchdog:
-                self._unsub_watchdog = async_track_time_interval(
-                    self.hass, self._async_watchdog_check, timedelta(seconds=WATCHDOG_INTERVAL)
-                )
-            if not self._unsub_battery:
-                self._unsub_battery = async_track_time_interval(
-                    self.hass, self._async_update_battery, timedelta(seconds=BATTERY_SCAN_INTERVAL)
-                )
+                # Setup background protection tasks now that we are connected
+                if not self._unsub_watchdog:
+                    self._unsub_watchdog = async_track_time_interval(
+                        self.hass, self._async_watchdog_check, timedelta(seconds=WATCHDOG_INTERVAL)
+                    )
+                if not self._unsub_heartbeat:
+                    self._unsub_heartbeat = async_track_time_interval(
+                        self.hass, self._async_send_heartbeat, timedelta(seconds=HEARTBEAT_INTERVAL)
+                    )
+                if not self._unsub_battery:
+                    self._unsub_battery = async_track_time_interval(
+                        self.hass, self._async_update_battery, timedelta(seconds=BATTERY_SCAN_INTERVAL)
+                    )
 
             # Grab an initial baseline battery read
             battery = await self.ble_client.get_battery()
@@ -87,6 +92,11 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
 
         except Exception as err:
             raise UpdateFailed(f"Error communicating with Emerald device: {err}")
+
+    async def _async_send_heartbeat(self, now: Any) -> None:
+        """Periodic keep-alive ping to prevent device sleep."""
+        if self.ble_client.is_connected:
+            await self.ble_client.send_heartbeat()
 
     async def _async_watchdog_check(self, now: Any) -> None:
         """Independent loop to verify the push stream hasn't died silently."""
@@ -115,6 +125,17 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _on_device_data(self, data: Dict[str, Any]) -> None:
         """Handle pushed data from the Bleak background thread."""
+        # Safely bounce execution off the Bleak background thread and onto HA's main event loop
+        self.hass.loop.call_soon_threadsafe(self._async_process_device_data, data)
+
+    @callback
+    def _async_process_device_data(self, data: Dict[str, Any]) -> None:
+        """Process data safely on the Home Assistant main event loop with deduplication."""
+        # Check the hardware-generated timestamp from the BLE payload against our last recorded state
+        if data.get("timestamp") == self.data.get("timestamp"):
+            _LOGGER.debug("Dropped duplicate Emerald BLE packet for timestamp: %s", data.get("timestamp"))
+            return
+
         self.last_data_received = dt_util.utcnow()
         new_data = dict(self.data)
         
@@ -132,8 +153,7 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
         if "timestamp" in data:
             new_data["timestamp"] = data["timestamp"]
 
-        # Safely hand the update back to the main Home Assistant event loop
-        self.hass.loop.call_soon_threadsafe(self.async_set_updated_data, new_data)
+        self.async_set_updated_data(new_data)
         
     def _on_disconnect(self) -> None:
         """Handle physical BLE disconnection safely."""
@@ -144,6 +164,8 @@ class EmeraldDataUpdateCoordinator(DataUpdateCoordinator):
         """Clean up tasks and connection on integration unload."""
         if self._unsub_watchdog:
             self._unsub_watchdog()
+        if self._unsub_heartbeat:
+            self._unsub_heartbeat()
         if self._unsub_battery:
             self._unsub_battery()
             
