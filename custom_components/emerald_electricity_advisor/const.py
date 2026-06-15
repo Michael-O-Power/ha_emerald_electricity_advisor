@@ -22,4 +22,5 @@ RETURN_30S_POWER_CONSUMPTION_CMD: Final = "0001020a06"
 
 # Background check intervals (seconds)
 WATCHDOG_INTERVAL: Final = 60
+HEARTBEAT_INTERVAL: Final = 300  # 5-minute keep-alive ping
 BATTERY_SCAN_INTERVAL: Final = 21600  # Poll battery every 6 hours
