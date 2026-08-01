@@ -131,6 +131,26 @@ class EmeraldBLEClient:
                 self.is_connected = False
                 self.client = None
 
+    async def send_heartbeat(self) -> bool:
+        """Periodic keep-alive packet to prevent device sleep and sustain auto-upload stream."""
+        if not self.is_connected or not self.client:
+            _LOGGER.debug("Skipping heartbeat: BLE client not connected.")
+            return False
+
+        try:
+            _LOGGER.debug("Sending heartbeat ping to Emerald Electricity Advisor...")
+            # Re-asserting the auto upload command to keep the push notification stream active
+            await self.client.write_gatt_char(
+                WRITE_CHAR_UUID, SET_AUTO_UPLOAD_STATUS_CMD, response=False
+            )
+            return True
+        except BleakError as err:
+            _LOGGER.warning(f"Failed to send heartbeat to Emerald device over BLE: {err}")
+            return False
+        except Exception as err:
+            _LOGGER.error(f"Unexpected error during heartbeat execution: {err}")
+            return False
+
     async def _enable_auto_upload(self) -> None:
         """Tell the device to automatically push power data every 30 seconds."""
         if not self.client or not self.is_connected:
